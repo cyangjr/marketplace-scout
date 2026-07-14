@@ -1,0 +1,9 @@
+[project]
+name = "marketplace-scout"
+version = "0.1.0"
+description = "Local deal-scout agent for Facebook Marketplace and Craigslist"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["scout*"]
