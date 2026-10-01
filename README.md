@@ -40,6 +40,10 @@ See `.env.example`. Minimum for Craigslist path: `GROQ_API_KEY`. Discord and Gem
 
 FB searches reuse one browser session per poll cycle, stagger between hunts (~45s), and only run every `FB_POLL_MINUTES` (default 30). On login wall / checkpoint / block, a **circuit breaker** pauses Facebook for `FB_CIRCUIT_HOURS` (default 12) while Craigslist keeps running. Discord gets a status ping; reset from the dashboard or `POST /api/fb/reset-circuit` after re-login.
 
+## Craigslist
+
+Search uses Craigslist's public HTML pages (not the JSON API). The host is still `{site}.craigslist.org` from the ZIP-prefix hint. Each request includes `postal` (the hunt ZIP), `search_distance` from the hunt's `max_miles` (or `DEFAULT_MAX_MILES`), `query`, `sort=date`, and `max_price` when set. Result pages use the `s` offset, up to `CL_MAX_PAGES` (default 3) and `CL_MAX_RESULTS` (default 120), and stop when a page adds no new posting ids. Posting pages are fetched only for rows that pass the tier-1 hard filter and whose text is still empty or just the title, capped by `CL_DETAIL_LIMIT` (default 15) with `CL_DETAIL_DELAY_SECONDS` (default 0.4) between those GETs. A failed detail fetch keeps the search card.
+
 ## Architecture
 
 - **Tier 1** — hard filters (price, exclude keywords, dedup)

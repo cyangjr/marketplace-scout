@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     fb_wait_max_seconds: float = 6.0
     fb_max_results: int = 25
 
+    # Craigslist public HTML search (no sapi.craigslist.org)
+    cl_max_pages: int = 3
+    cl_max_results: int = 120
+    cl_detail_limit: int = 15
+    cl_detail_delay_seconds: float = 0.4
+
     @property
     def allowed_user_ids(self) -> set[int]:
         if not self.discord_allowed_user_ids.strip():
