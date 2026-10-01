@@ -1,6 +1,6 @@
 # Marketplace Scout
 
-Personal Local Deal-Scout: polls Facebook Marketplace and Craigslist, verifies listings with a three-tier free cascade (hard filters → Groq text → conditional Gemini vision), filters by distance, and alerts via a dashboard + Discord.
+Personal Local Deal-Scout: polls Facebook Marketplace and Craigslist, verifies listings with a three-tier free cascade (hard filters → Groq text, with Gemini text fallback → conditional Gemini vision), filters by distance, and alerts via a dashboard + Discord.
 
 ## Setup
 
@@ -34,7 +34,7 @@ Log into Facebook in the browser window, then close it. Session persists in `dat
 
 ## Env
 
-See `.env.example`. Minimum for Craigslist path: `GROQ_API_KEY`. Discord and Gemini are optional until you want alerts / vision.
+See `.env.example`. Minimum for Craigslist path: `GROQ_API_KEY`. Discord and Gemini are optional until you want alerts / vision. Text verification uses `GROQ_MODEL` (default `openai/gpt-oss-120b`; alternate `qwen/qwen3.6-27b`). If that model is missing, decommissioned, or rate-limited, and `GEMINI_API_KEY` is set, the same text verdict is requested from `GEMINI_MODEL` (default `gemini-3.5-flash`). Vision uses that same Gemini model.
 
 ## Facebook pacing
 
@@ -43,7 +43,7 @@ FB searches reuse one browser session per poll cycle, stagger between hunts (~45
 ## Architecture
 
 - **Tier 1** — hard filters (price, exclude keywords, dedup)
-- **Tier 2** — Groq text match
-- **Tier 3** — Gemini Flash vision (ambiguous / image-critical only)
+- **Tier 2** — Groq text match (`openai/gpt-oss-120b`), Gemini text fallback (`gemini-3.5-flash`)
+- **Tier 3** — Gemini Flash vision (`gemini-3.5-flash`, ambiguous / image-critical only)
 - **Distance** — Nominatim + Haversine
 - **Sources** — Craigslist adapter + Playwright Facebook Marketplace
