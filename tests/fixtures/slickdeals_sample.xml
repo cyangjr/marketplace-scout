@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Slickdeals Frontpage</title>
+    <item>
+      <title>Herman Miller Aeron Chair $189.00</title>
+      <link>https://slickdeals.net/f/18001-aeron</link>
+      <description><![CDATA[Refurbished size B <img src="https://static.slickdealscdn.com/aeron.jpg">]]></description>
+      <guid isPermaLink="true">https://slickdeals.net/f/18001-aeron</guid>
+      <enclosure url="https://static.slickdealscdn.com/enc.jpg" type="image/jpeg"/>
+    </item>
+    <item>
+      <title>Aeron lumbar support only $40</title>
+      <link>https://slickdeals.net/f/18003-lumbar</link>
+      <description>replacement pad</description>
+      <guid>sd-18003</guid>
+    </item>
+    <item>
+      <title>Aeron chair price hidden</title>
+      <link>https://slickdeals.net/f/18004-hidden</link>
+      <description>office chair deal</description>
+      <guid>sd-18004</guid>
+    </item>
+    <item>
+      <title>Random toaster $19.99</title>
+      <link>https://slickdeals.net/f/18002-toaster</link>
+      <description>Kitchen gadget</description>
+      <guid>https://slickdeals.net/f/18002-toaster</guid>
+    </item>
+  </channel>
+</rss>

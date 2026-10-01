@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 from scout.config import get_settings
 
 router = APIRouter()
+
+HuntKind = Literal["local", "online"]
 
 
 class HuntCreate(BaseModel):
@@ -20,6 +22,7 @@ class HuntCreate(BaseModel):
     image_critical: bool = False
     poll_interval_minutes: int | None = None
     active: bool = True
+    kind: HuntKind = "local"
 
 
 class HuntUpdate(BaseModel):
@@ -32,6 +35,7 @@ class HuntUpdate(BaseModel):
     image_critical: bool | None = None
     poll_interval_minutes: int | None = None
     active: bool | None = None
+    kind: HuntKind | None = None
 
 
 class MatchFlags(BaseModel):

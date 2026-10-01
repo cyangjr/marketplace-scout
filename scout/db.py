@@ -52,6 +52,7 @@ class Database:
                     image_critical INTEGER NOT NULL DEFAULT 0,
                     poll_interval_minutes INTEGER NOT NULL DEFAULT 15,
                     active INTEGER NOT NULL DEFAULT 1,
+                    kind TEXT NOT NULL DEFAULT 'local',
                     last_polled_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -109,6 +110,13 @@ class Database:
                 );
                 """
             )
+            columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(hunts)")
+            }
+            if "kind" not in columns:
+                conn.execute(
+                    "ALTER TABLE hunts ADD COLUMN kind TEXT NOT NULL DEFAULT 'local'"
+                )
 
     # --- meta / status ---
 
@@ -139,8 +147,8 @@ class Database:
                 INSERT INTO hunts (
                     query, max_price, max_miles, home_zip, home_lat, home_lng,
                     sources, exclude_keywords, image_critical, poll_interval_minutes,
-                    active, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    active, kind, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                 """,
                 (
                     data["query"],
@@ -153,6 +161,7 @@ class Database:
                     json.dumps(data.get("exclude_keywords", [])),
                     1 if data.get("image_critical") else 0,
                     data.get("poll_interval_minutes", 15),
+                    data.get("kind") or "local",
                     now,
                     now,
                 ),
@@ -172,7 +181,7 @@ class Database:
                     query = ?, max_price = ?, max_miles = ?, home_zip = ?,
                     home_lat = ?, home_lng = ?, sources = ?, exclude_keywords = ?,
                     image_critical = ?, poll_interval_minutes = ?, active = ?,
-                    updated_at = ?
+                    kind = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -191,6 +200,7 @@ class Database:
                     1 if merged.get("image_critical") else 0,
                     merged["poll_interval_minutes"],
                     1 if merged.get("active", True) else 0,
+                    merged.get("kind") or "local",
                     _utc_now(),
                     hunt_id,
                 ),
@@ -235,6 +245,7 @@ class Database:
         d["exclude_keywords"] = json.loads(d["exclude_keywords"])
         d["active"] = bool(d["active"])
         d["image_critical"] = bool(d["image_critical"])
+        d["kind"] = d.get("kind") or "local"
         return d
 
     # --- listings ---

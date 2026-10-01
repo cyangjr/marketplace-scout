@@ -1,6 +1,6 @@
 # Marketplace Scout
 
-Personal Local Deal-Scout: polls Facebook Marketplace and Craigslist, verifies listings with a three-tier free cascade (hard filters → Groq text → conditional Gemini vision), filters by distance, and alerts via a dashboard + Discord.
+Personal deal-scout: polls Facebook Marketplace and Craigslist for local pickup, and Slickdeals plus Reddit for national online deals. Listings go through a three-tier free cascade (hard filters → Groq text → conditional Gemini vision). Local hunts filter by distance. Alerts land on the dashboard and Discord.
 
 ## Setup
 
@@ -40,10 +40,19 @@ See `.env.example`. Minimum for Craigslist path: `GROQ_API_KEY`. Discord and Gem
 
 FB searches reuse one browser session per poll cycle, stagger between hunts (~45s), and only run every `FB_POLL_MINUTES` (default 30). On login wall / checkpoint / block, a **circuit breaker** pauses Facebook for `FB_CIRCUIT_HOURS` (default 12) while Craigslist keeps running. Discord gets a status ping; reset from the dashboard or `POST /api/fb/reset-circuit` after re-login.
 
+## Online hunts
+
+Slickdeals and Reddit are national online retail feeds. They are not local pickup, so an online hunt (`kind=online`) does not apply the distance check — `drive_miles` stays empty. Local hunts (Facebook Marketplace and Craigslist) still use max miles.
+
+- **Slickdeals** polls the public frontpage RSS and the popular-deals RSS. Those feeds ignore a server-side `search=`, so titles and descriptions are filtered client-side by hunt keywords.
+- **Reddit** polls public `new.json` (no OAuth) for up to four subreddits from `REDDIT_SUBREDDITS` (default `deals,buildapcsales`). Stickied posts are skipped.
+
+Keyword matching is only a recall filter. The existing verifier still decides whether a listing is the item you want. If one feed request fails, that feed is skipped and the hunt continues.
+
 ## Architecture
 
 - **Tier 1** — hard filters (price, exclude keywords, dedup)
 - **Tier 2** — Groq text match
 - **Tier 3** — Gemini Flash vision (ambiguous / image-critical only)
-- **Distance** — Nominatim + Haversine
-- **Sources** — Craigslist adapter + Playwright Facebook Marketplace
+- **Distance** — Nominatim + Haversine for local hunts only
+- **Sources** — Craigslist, Playwright Facebook Marketplace, Slickdeals RSS, Reddit JSON
