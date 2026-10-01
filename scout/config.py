@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     fb_wait_max_seconds: float = 6.0
     fb_max_results: int = 25
 
+    # eBay Browse API (local pickup). Empty credentials skip the source.
+    ebay_client_id: str = ""
+    ebay_client_secret: str = ""
+    ebay_max_results: int = 50
+
     @property
     def allowed_user_ids(self) -> set[int]:
         if not self.discord_allowed_user_ids.strip():

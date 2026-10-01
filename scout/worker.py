@@ -10,6 +10,7 @@ from typing import Any, Awaitable, Callable
 from scout.config import Settings
 from scout.db import Database
 from scout.sources.craigslist import CraigslistAdapter
+from scout.sources.ebay import EbayAdapter
 from scout.sources.fb import FacebookAdapter, FacebookBlockedError, FacebookSession
 from scout.verify import VerifierPipeline
 from scout.verify.distance import geocode_zip
@@ -47,6 +48,7 @@ class ScoutWorker:
         self.on_status = on_status
         self.craigslist = CraigslistAdapter()
         self.facebook = FacebookAdapter(settings)
+        self.ebay = EbayAdapter(settings)
         self.verifier = VerifierPipeline(db, settings)
         self._running = False
         self.last_error: str | None = None
@@ -129,6 +131,10 @@ class ScoutWorker:
             "fb_poll_minutes": self.settings.fb_poll_minutes,
             "groq_configured": bool(self.settings.groq_api_key),
             "gemini_configured": bool(self.settings.gemini_api_key),
+            "ebay_configured": bool(
+                self.settings.ebay_client_id.strip()
+                and self.settings.ebay_client_secret.strip()
+            ),
             "discord_configured": bool(
                 self.settings.discord_bot_token and self.settings.discord_channel_id
             ),
@@ -202,6 +208,7 @@ class ScoutWorker:
                 due = force or self._hunt_due(hunt)
                 want_fb = hunt["id"] in fb_ids and fb_session is not None
                 want_cl = "craigslist" in (hunt.get("sources") or []) and due
+                want_ebay = "ebay" in (hunt.get("sources") or []) and due
                 if not due and not want_fb:
                     continue
                 try:
@@ -216,6 +223,7 @@ class ScoutWorker:
                         fb_session=fb_session if want_fb else None,
                         run_craigslist=want_cl or (due and "craigslist" in (hunt.get("sources") or [])),
                         run_facebook=want_fb,
+                        run_ebay=want_ebay,
                     )
                     if want_fb:
                         first_fb = False
@@ -254,6 +262,7 @@ class ScoutWorker:
         fb_session: FacebookSession | None,
         run_craigslist: bool,
         run_facebook: bool,
+        run_ebay: bool = False,
     ) -> None:
         stats["hunts"] += 1
         if hunt.get("home_lat") is None or hunt.get("home_lng") is None:
@@ -278,6 +287,15 @@ class ScoutWorker:
                     hunt["query"], hunt["home_zip"], hunt.get("max_price")
                 )
             )
+        if run_ebay and "ebay" in sources:
+            raw_listings.extend(
+                await self.ebay.search(
+                    hunt["query"],
+                    hunt["home_zip"],
+                    hunt.get("max_price"),
+                    max_miles=hunt.get("max_miles"),
+                )
+            )
 
         raw_listings.sort(key=lambda r: 0 if r.source == "facebook" else 1)
 
@@ -299,5 +317,5 @@ class ScoutWorker:
             self.db.record_alert(ev["id"], msg_id)
             stats["alerts"] += 1
 
-        if run_craigslist or run_facebook:
+        if run_craigslist or run_facebook or run_ebay:
             self.db.set_hunt_polled(hunt["id"])
