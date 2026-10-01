@@ -18,9 +18,9 @@ class Settings(BaseSettings):
     discord_allowed_user_ids: str = ""
 
     groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "openai/gpt-oss-120b"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3.5-flash"
 
     home_zip: str = "10001"
     default_max_miles: float = 25.0

@@ -9,7 +9,7 @@ from scout.db import Database
 from scout.verify.distance import GeoPoint, geocode_text, geocode_zip, haversine_miles
 from scout.verify.filters import hard_filter
 from scout.verify.gemini_vision import GeminiVisionVerifier
-from scout.verify.groq_text import GroqTextVerifier
+from scout.verify.groq_text import TextCascade
 from scout.verify.pricing import price_outlier
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ class VerifierPipeline:
     def __init__(self, db: Database, settings: Settings) -> None:
         self.db = db
         self.settings = settings
-        self.groq = GroqTextVerifier(settings)
+        self.text = TextCascade(settings)
         self.gemini = GeminiVisionVerifier(settings)
 
     async def evaluate(self, hunt: dict[str, Any], listing: dict[str, Any]) -> PipelineResult | None:
@@ -59,8 +59,8 @@ class VerifierPipeline:
             )
             return PipelineResult(ev, should_alert=False)
 
-        # Tier 2
-        text = await self.groq.verify(
+        # Tier 2: Groq text, Gemini text if Groq's model is gone or rate-limited, else heuristic
+        text = await self.text.verify(
             hunt_query=hunt["query"],
             title=listing["title"],
             body=listing.get("raw_text") or "",
