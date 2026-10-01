@@ -13,6 +13,7 @@ type Status = {
   fb_poll_minutes?: number;
   groq_configured: boolean;
   gemini_configured: boolean;
+  ebay_configured: boolean;
   discord_configured: boolean;
 };
 
@@ -79,6 +80,7 @@ export default function App() {
   const [homeZip, setHomeZip] = useState("10001");
   const [srcCl, setSrcCl] = useState(true);
   const [srcFb, setSrcFb] = useState(true);
+  const [srcEbay, setSrcEbay] = useState(false);
   const [imageCritical, setImageCritical] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -108,6 +110,7 @@ export default function App() {
     const sources = [
       ...(srcFb ? ["facebook"] : []),
       ...(srcCl ? ["craigslist"] : []),
+      ...(srcEbay ? ["ebay"] : []),
     ];
     if (!query.trim() || sources.length === 0) return;
     await api("/api/hunts", {
@@ -186,8 +189,8 @@ export default function App() {
     <>
       <h1 className="brand">Marketplace Scout</h1>
       <p className="lede">
-        Hunt local deals on Facebook Marketplace and Craigslist. Verified matches
-        only — hard filters, Groq text, then Gemini vision when needed.
+        Hunt local deals on Facebook Marketplace, Craigslist, and eBay local pickup.
+        Verified matches only — hard filters, Groq text, then Gemini vision when needed.
       </p>
 
       <div className="status-strip">
@@ -202,6 +205,9 @@ export default function App() {
         </span>
         <span className="pill">
           <Dot kind={status?.gemini_configured ? "ok" : "warn"} /> Gemini
+        </span>
+        <span className="pill">
+          <Dot kind={status?.ebay_configured ? "ok" : "warn"} /> eBay
         </span>
         <span className="pill">
           <Dot kind={status?.discord_configured ? "ok" : "warn"} /> Discord
@@ -268,6 +274,14 @@ export default function App() {
               <label>
                 <input type="checkbox" checked={srcCl} onChange={(e) => setSrcCl(e.target.checked)} />
                 Craigslist
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={srcEbay}
+                  onChange={(e) => setSrcEbay(e.target.checked)}
+                />
+                eBay
               </label>
               <label>
                 <input
