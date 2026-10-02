@@ -9,15 +9,80 @@ from typing import Any, Awaitable, Callable
 
 from scout.config import Settings
 from scout.db import Database
+from scout.sources import RawListing
 from scout.sources.craigslist import CraigslistAdapter
 from scout.sources.fb import FacebookAdapter, FacebookBlockedError, FacebookSession
 from scout.verify import VerifierPipeline
 from scout.verify.distance import geocode_zip
+from scout.verify.filters import hard_filter
 
 logger = logging.getLogger(__name__)
 
 AlertCallback = Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], Awaitable[str | None]]
 StatusNotify = Callable[[str], Awaitable[None]]
+DetailFetcher = Callable[[RawListing], Awaitable[RawListing]]
+SleepFn = Callable[[float], Awaitable[None]]
+
+
+def needs_craigslist_detail(
+    listing: RawListing,
+    *,
+    max_price: float | None,
+    exclude_keywords: list[str] | None = None,
+) -> bool:
+    """True when a Craigslist card passed tier-1 and still has no posting body."""
+    if listing.source != "craigslist":
+        return False
+    result = hard_filter(
+        title=listing.title,
+        raw_text=listing.raw_text or "",
+        price=listing.price,
+        max_price=max_price,
+        exclude_keywords=exclude_keywords,
+    )
+    if not result.passed:
+        return False
+    body = (listing.raw_text or "").strip()
+    title = (listing.title or "").strip()
+    return body == "" or body == title
+
+
+async def enrich_craigslist_listings(
+    listings: list[RawListing],
+    *,
+    max_price: float | None,
+    exclude_keywords: list[str] | None,
+    fetch_detail: DetailFetcher,
+    detail_limit: int,
+    delay_seconds: float,
+    sleep: SleepFn | None = None,
+) -> list[RawListing]:
+    """Fetch posting pages for hard-filter survivors, capped per hunt poll."""
+    pause = sleep or asyncio.sleep
+    enriched: list[RawListing] = []
+    fetched = 0
+    for listing in listings:
+        if fetched >= detail_limit or not needs_craigslist_detail(
+            listing,
+            max_price=max_price,
+            exclude_keywords=exclude_keywords,
+        ):
+            enriched.append(listing)
+            continue
+        if fetched > 0 and delay_seconds > 0:
+            await pause(delay_seconds)
+        try:
+            listing = await fetch_detail(listing)
+        except Exception as exc:
+            logger.warning(
+                "craigslist detail fetch failed for %s: %s",
+                listing.url,
+                exc,
+                exc_info=True,
+            )
+        fetched += 1
+        enriched.append(listing)
+    return enriched
 
 
 def _utc_now() -> datetime:
@@ -45,7 +110,10 @@ class ScoutWorker:
         self.settings = settings
         self.on_alert = on_alert
         self.on_status = on_status
-        self.craigslist = CraigslistAdapter()
+        self.craigslist = CraigslistAdapter(
+            max_pages=settings.cl_max_pages,
+            max_results=settings.cl_max_results,
+        )
         self.facebook = FacebookAdapter(settings)
         self.verifier = VerifierPipeline(db, settings)
         self._running = False
@@ -267,9 +335,15 @@ class ScoutWorker:
         sources = hunt.get("sources") or ["craigslist"]
         raw_listings = []
         if run_craigslist and "craigslist" in sources:
+            max_miles = hunt.get("max_miles")
+            if max_miles is None:
+                max_miles = self.settings.default_max_miles
             raw_listings.extend(
                 await self.craigslist.search(
-                    hunt["query"], hunt["home_zip"], hunt.get("max_price")
+                    hunt["query"],
+                    hunt["home_zip"],
+                    hunt.get("max_price"),
+                    max_miles=float(max_miles),
                 )
             )
         if run_facebook and "facebook" in sources and fb_session is not None:
@@ -280,6 +354,14 @@ class ScoutWorker:
             )
 
         raw_listings.sort(key=lambda r: 0 if r.source == "facebook" else 1)
+        raw_listings = await enrich_craigslist_listings(
+            raw_listings,
+            max_price=hunt.get("max_price"),
+            exclude_keywords=hunt.get("exclude_keywords") or [],
+            fetch_detail=self.craigslist.fetch_detail,
+            detail_limit=self.settings.cl_detail_limit,
+            delay_seconds=self.settings.cl_detail_delay_seconds,
+        )
 
         for raw in raw_listings:
             listing = self.db.upsert_listing(asdict(raw))
