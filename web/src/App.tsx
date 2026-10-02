@@ -23,6 +23,7 @@ type Hunt = {
   max_miles: number;
   home_zip: string;
   sources: string[];
+  kind?: string;
   exclude_keywords: string[];
   image_critical: boolean;
   poll_interval_minutes: number;
@@ -79,6 +80,9 @@ export default function App() {
   const [homeZip, setHomeZip] = useState("10001");
   const [srcCl, setSrcCl] = useState(true);
   const [srcFb, setSrcFb] = useState(true);
+  const [srcSd, setSrcSd] = useState(true);
+  const [srcRd, setSrcRd] = useState(true);
+  const [huntKind, setHuntKind] = useState<"local" | "online">("local");
   const [imageCritical, setImageCritical] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -105,17 +109,18 @@ export default function App() {
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
-    const sources = [
-      ...(srcFb ? ["facebook"] : []),
-      ...(srcCl ? ["craigslist"] : []),
-    ];
+    const sources =
+      huntKind === "online"
+        ? [...(srcSd ? ["slickdeals"] : []), ...(srcRd ? ["reddit"] : [])]
+        : [...(srcFb ? ["facebook"] : []), ...(srcCl ? ["craigslist"] : [])];
     if (!query.trim() || sources.length === 0) return;
     await api("/api/hunts", {
       method: "POST",
       body: JSON.stringify({
         query: query.trim(),
+        kind: huntKind,
         max_price: maxPrice ? Number(maxPrice) : null,
-        max_miles: Number(maxMiles) || 25,
+        ...(huntKind === "local" ? { max_miles: Number(maxMiles) || 25 } : {}),
         home_zip: homeZip.trim(),
         sources,
         image_critical: imageCritical,
@@ -186,8 +191,9 @@ export default function App() {
     <>
       <h1 className="brand">Marketplace Scout</h1>
       <p className="lede">
-        Hunt local deals on Facebook Marketplace and Craigslist. Verified matches
-        only — hard filters, Groq text, then Gemini vision when needed.
+        Hunt local pickup on Facebook Marketplace and Craigslist, or national online
+        deals from Slickdeals and Reddit. Verified matches only — hard filters, Groq
+        text, then Gemini vision when needed. Online hunts skip the mile check.
       </p>
 
       <div className="status-strip">
@@ -246,29 +252,68 @@ export default function App() {
                 required
               />
             </label>
-            <div className="row-2">
+            <div>
+              <span className="field-label">Hunt type</span>
+              <div className="kind-toggle" role="group" aria-label="Hunt type">
+                <button
+                  type="button"
+                  className={`btn small ${huntKind === "local" ? "" : "ghost"}`}
+                  onClick={() => setHuntKind("local")}
+                >
+                  Local
+                </button>
+                <button
+                  type="button"
+                  className={`btn small ${huntKind === "online" ? "" : "ghost"}`}
+                  onClick={() => setHuntKind("online")}
+                >
+                  Online
+                </button>
+              </div>
+            </div>
+            <div className={huntKind === "local" ? "row-2" : undefined}>
               <label>
                 Max price
                 <input value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} />
               </label>
-              <label>
-                Max miles
-                <input value={maxMiles} onChange={(e) => setMaxMiles(e.target.value)} />
-              </label>
+              {huntKind === "local" && (
+                <label>
+                  Max miles
+                  <input value={maxMiles} onChange={(e) => setMaxMiles(e.target.value)} />
+                </label>
+              )}
             </div>
+            {huntKind === "online" && (
+              <p className="hint">National feeds — distance is not applied.</p>
+            )}
             <label>
               Home ZIP
               <input value={homeZip} onChange={(e) => setHomeZip(e.target.value)} required />
             </label>
             <div className="checks">
-              <label>
-                <input type="checkbox" checked={srcFb} onChange={(e) => setSrcFb(e.target.checked)} />
-                Facebook
-              </label>
-              <label>
-                <input type="checkbox" checked={srcCl} onChange={(e) => setSrcCl(e.target.checked)} />
-                Craigslist
-              </label>
+              {huntKind === "local" ? (
+                <>
+                  <label>
+                    <input type="checkbox" checked={srcFb} onChange={(e) => setSrcFb(e.target.checked)} />
+                    Facebook
+                  </label>
+                  <label>
+                    <input type="checkbox" checked={srcCl} onChange={(e) => setSrcCl(e.target.checked)} />
+                    Craigslist
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label>
+                    <input type="checkbox" checked={srcSd} onChange={(e) => setSrcSd(e.target.checked)} />
+                    Slickdeals
+                  </label>
+                  <label>
+                    <input type="checkbox" checked={srcRd} onChange={(e) => setSrcRd(e.target.checked)} />
+                    Reddit
+                  </label>
+                </>
+              )}
               <label>
                 <input
                   type="checkbox"
@@ -289,9 +334,9 @@ export default function App() {
               <div className="hunt-item" key={h.id}>
                 <strong>{h.query}</strong>
                 <div className="meta">
-                  #{h.id} · {h.active ? "active" : "paused"} · {h.sources.join(", ")} · max{" "}
-                  {h.max_price != null ? `$${h.max_price}` : "∞"} · {h.max_miles} mi ·{" "}
-                  {h.match_count} matches
+                  #{h.id} · {h.kind ?? "local"} · {h.active ? "active" : "paused"} ·{" "}
+                  {h.sources.join(", ")} · max {h.max_price != null ? `$${h.max_price}` : "∞"}
+                  {h.kind === "online" ? "" : ` · ${h.max_miles} mi`} · {h.match_count} matches
                 </div>
                 <div className="hunt-actions">
                   <button className="btn small ghost" onClick={() => void toggleHunt(h)}>

@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     fb_wait_max_seconds: float = 6.0
     fb_max_results: int = 25
 
+    # Online deal feeds. Comma-separated subreddit names; at most 4 are polled.
+    reddit_subreddits: str = "deals,buildapcsales"
+
     @property
     def allowed_user_ids(self) -> set[int]:
         if not self.discord_allowed_user_ids.strip():

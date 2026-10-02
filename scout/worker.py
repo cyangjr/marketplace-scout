@@ -11,6 +11,8 @@ from scout.config import Settings
 from scout.db import Database
 from scout.sources.craigslist import CraigslistAdapter
 from scout.sources.fb import FacebookAdapter, FacebookBlockedError, FacebookSession
+from scout.sources.reddit import RedditAdapter
+from scout.sources.slickdeals import SlickdealsAdapter
 from scout.verify import VerifierPipeline
 from scout.verify.distance import geocode_zip
 
@@ -47,6 +49,8 @@ class ScoutWorker:
         self.on_status = on_status
         self.craigslist = CraigslistAdapter()
         self.facebook = FacebookAdapter(settings)
+        self.slickdeals = SlickdealsAdapter()
+        self.reddit = RedditAdapter(settings)
         self.verifier = VerifierPipeline(db, settings)
         self._running = False
         self.last_error: str | None = None
@@ -106,6 +110,10 @@ class ScoutWorker:
     def _mark_fb_polled(self, hunt_id: int) -> None:
         self.db.set_meta(f"fb_last_poll:{hunt_id}", _utc_now().isoformat())
 
+    @staticmethod
+    def _hunt_kind(hunt: dict[str, Any]) -> str:
+        return hunt.get("kind") or "local"
+
     def _hunt_due(self, hunt: dict[str, Any]) -> bool:
         last = _parse_iso(hunt.get("last_polled_at"))
         if not last:
@@ -159,7 +167,8 @@ class ScoutWorker:
             needs_fb = [
                 h
                 for h in hunts
-                if "facebook" in (h.get("sources") or [])
+                if self._hunt_kind(h) != "online"
+                and "facebook" in (h.get("sources") or [])
                 and (force or self._fb_due_for_hunt(h["id"]))
             ]
             circuit_open = self.fb_circuit_open()
@@ -170,7 +179,8 @@ class ScoutWorker:
                 skipped = [
                     h
                     for h in hunts
-                    if "facebook" in (h.get("sources") or [])
+                    if self._hunt_kind(h) != "online"
+                    and "facebook" in (h.get("sources") or [])
                     and not force
                     and not self._fb_due_for_hunt(h["id"])
                 ]
@@ -200,8 +210,16 @@ class ScoutWorker:
 
             for hunt in hunts:
                 due = force or self._hunt_due(hunt)
-                want_fb = hunt["id"] in fb_ids and fb_session is not None
-                want_cl = "craigslist" in (hunt.get("sources") or []) and due
+                sources = hunt.get("sources") or []
+                # Online hunts never open Facebook, even if that source is listed.
+                want_fb = (
+                    self._hunt_kind(hunt) != "online"
+                    and hunt["id"] in fb_ids
+                    and fb_session is not None
+                )
+                want_cl = "craigslist" in sources and due
+                want_sd = "slickdeals" in sources and due
+                want_rd = "reddit" in sources and due
                 if not due and not want_fb:
                     continue
                 try:
@@ -214,8 +232,10 @@ class ScoutWorker:
                         hunt,
                         stats,
                         fb_session=fb_session if want_fb else None,
-                        run_craigslist=want_cl or (due and "craigslist" in (hunt.get("sources") or [])),
+                        run_craigslist=want_cl or (due and "craigslist" in sources),
                         run_facebook=want_fb,
+                        run_slickdeals=want_sd,
+                        run_reddit=want_rd,
                     )
                     if want_fb:
                         first_fb = False
@@ -254,9 +274,14 @@ class ScoutWorker:
         fb_session: FacebookSession | None,
         run_craigslist: bool,
         run_facebook: bool,
+        run_slickdeals: bool = False,
+        run_reddit: bool = False,
     ) -> None:
         stats["hunts"] += 1
-        if hunt.get("home_lat") is None or hunt.get("home_lng") is None:
+        kind = self._hunt_kind(hunt)
+        if kind != "online" and (
+            hunt.get("home_lat") is None or hunt.get("home_lng") is None
+        ):
             pt = await geocode_zip(hunt["home_zip"])
             if pt:
                 self.db.update_hunt(
@@ -275,6 +300,18 @@ class ScoutWorker:
         if run_facebook and "facebook" in sources and fb_session is not None:
             raw_listings.extend(
                 await fb_session.search(
+                    hunt["query"], hunt["home_zip"], hunt.get("max_price")
+                )
+            )
+        if run_slickdeals and "slickdeals" in sources:
+            raw_listings.extend(
+                await self.slickdeals.search(
+                    hunt["query"], hunt["home_zip"], hunt.get("max_price")
+                )
+            )
+        if run_reddit and "reddit" in sources:
+            raw_listings.extend(
+                await self.reddit.search(
                     hunt["query"], hunt["home_zip"], hunt.get("max_price")
                 )
             )
@@ -299,5 +336,5 @@ class ScoutWorker:
             self.db.record_alert(ev["id"], msg_id)
             stats["alerts"] += 1
 
-        if run_craigslist or run_facebook:
+        if run_craigslist or run_facebook or run_slickdeals or run_reddit:
             self.db.set_hunt_polled(hunt["id"])

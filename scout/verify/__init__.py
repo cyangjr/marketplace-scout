@@ -121,41 +121,42 @@ class VerifierPipeline:
             )
             return PipelineResult(ev, should_alert=False)
 
-        # Distance
-        home = None
-        if hunt.get("home_lat") is not None and hunt.get("home_lng") is not None:
-            home = GeoPoint(float(hunt["home_lat"]), float(hunt["home_lng"]))
-        else:
-            home = await geocode_zip(hunt["home_zip"])
-
+        # Distance applies to local pickup only. Online retail has no driveway.
         drive_miles = None
-        if home:
-            listing_pt = None
-            if listing.get("lat") is not None and listing.get("lng") is not None:
-                listing_pt = GeoPoint(float(listing["lat"]), float(listing["lng"]))
-            elif listing.get("location_text"):
-                listing_pt = await geocode_text(
-                    listing["location_text"], near_zip=hunt["home_zip"]
-                )
-            if listing_pt:
-                drive_miles = haversine_miles(home, listing_pt)
-                if drive_miles > float(hunt["max_miles"]):
-                    ev = self.db.save_evaluation(
-                        {
-                            "hunt_id": hunt["id"],
-                            "listing_id": listing["id"],
-                            "tier_used": tier_used,
-                            "is_match": True,
-                            "confidence": confidence,
-                            "item_identity": item_identity,
-                            "red_flags": red_flags + ["too_far"],
-                            "reason": f"{reason} | {drive_miles:.1f} mi > max {hunt['max_miles']}",
-                            "drive_miles": drive_miles,
-                            "price_outlier": None,
-                            "decision": "skip",
-                        }
+        if hunt.get("kind") != "online":
+            home = None
+            if hunt.get("home_lat") is not None and hunt.get("home_lng") is not None:
+                home = GeoPoint(float(hunt["home_lat"]), float(hunt["home_lng"]))
+            else:
+                home = await geocode_zip(hunt["home_zip"])
+
+            if home:
+                listing_pt = None
+                if listing.get("lat") is not None and listing.get("lng") is not None:
+                    listing_pt = GeoPoint(float(listing["lat"]), float(listing["lng"]))
+                elif listing.get("location_text"):
+                    listing_pt = await geocode_text(
+                        listing["location_text"], near_zip=hunt["home_zip"]
                     )
-                    return PipelineResult(ev, should_alert=False)
+                if listing_pt:
+                    drive_miles = haversine_miles(home, listing_pt)
+                    if drive_miles > float(hunt["max_miles"]):
+                        ev = self.db.save_evaluation(
+                            {
+                                "hunt_id": hunt["id"],
+                                "listing_id": listing["id"],
+                                "tier_used": tier_used,
+                                "is_match": True,
+                                "confidence": confidence,
+                                "item_identity": item_identity,
+                                "red_flags": red_flags + ["too_far"],
+                                "reason": f"{reason} | {drive_miles:.1f} mi > max {hunt['max_miles']}",
+                                "drive_miles": drive_miles,
+                                "price_outlier": None,
+                                "decision": "skip",
+                            }
+                        )
+                        return PipelineResult(ev, should_alert=False)
 
         outlier = price_outlier(
             listing.get("price"),

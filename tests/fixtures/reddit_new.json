@@ -1,0 +1,72 @@
+{
+  "data": {
+    "children": [
+      {
+        "kind": "t3",
+        "data": {
+          "id": "post1",
+          "title": "Herman Miller Aeron Chair $220",
+          "selftext": "Office sale, size B",
+          "permalink": "/r/deals/comments/post1/herman_miller_aeron/",
+          "thumbnail": "https://b.thumbs.redditmedia.com/aeron.jpg",
+          "stickied": false
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "id": "sticky1",
+          "title": "Aeron chair megathread",
+          "selftext": "Aeron chair discussion",
+          "permalink": "/r/deals/comments/sticky1/mega/",
+          "thumbnail": "https://b.thumbs.redditmedia.com/sticky.jpg",
+          "stickied": true
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "id": "postself",
+          "title": "Aeron chair self post",
+          "selftext": "no photo",
+          "permalink": "/r/deals/comments/postself/self/",
+          "thumbnail": "self",
+          "stickied": false
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "id": "postdefault",
+          "title": "Aeron chair default thumb",
+          "selftext": "",
+          "permalink": "/r/deals/comments/postdefault/def/",
+          "thumbnail": "default",
+          "stickied": false
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "id": "postnsfw",
+          "title": "Aeron chair nsfw thumb",
+          "selftext": "aeron chair",
+          "permalink": "/r/deals/comments/postnsfw/nsfw/",
+          "thumbnail": "nsfw",
+          "stickied": false
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "id": "postblender",
+          "title": "Unrelated blender deal",
+          "selftext": "kitchen",
+          "permalink": "/r/deals/comments/postblender/blender/",
+          "thumbnail": "https://example.com/blender.jpg",
+          "stickied": false
+        }
+      }
+    ]
+  }
+}
