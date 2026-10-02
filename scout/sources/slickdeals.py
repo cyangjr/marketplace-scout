@@ -45,15 +45,19 @@ def _http_url(value: str | None) -> bool:
 
 def _item_images(item: ET.Element, description: str) -> list[str]:
     images: list[str] = []
+    blobs = [description or ""]
     for child in list(item):
-        if _local_tag(child.tag) != "enclosure":
-            continue
-        url = child.get("url") or ""
-        if _http_url(url) and url not in images:
-            images.append(url)
-    for src in _IMG_RE.findall(description or ""):
-        if _http_url(src) and src not in images:
-            images.append(src)
+        tag = _local_tag(child.tag)
+        if tag == "enclosure":
+            url = child.get("url") or ""
+            if _http_url(url) and url not in images:
+                images.append(url)
+        elif tag in {"encoded", "content"} and child.text:
+            blobs.append(child.text)
+    for blob in blobs:
+        for src in _IMG_RE.findall(blob):
+            if _http_url(src) and src not in images:
+                images.append(src)
     return images
 
 

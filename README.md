@@ -45,7 +45,7 @@ FB searches reuse one browser session per poll cycle, stagger between hunts (~45
 Slickdeals and Reddit are national online retail feeds. They are not local pickup, so an online hunt (`kind=online`) does not apply the distance check — `drive_miles` stays empty. Local hunts (Facebook Marketplace and Craigslist) still use max miles.
 
 - **Slickdeals** polls the public frontpage RSS and the popular-deals RSS. Those feeds ignore a server-side `search=`, so titles and descriptions are filtered client-side by hunt keywords.
-- **Reddit** polls public `new.json` (no OAuth) for up to four subreddits from `REDDIT_SUBREDDITS` (default `deals,buildapcsales`). Stickied posts are skipped.
+- **Reddit** polls the public Atom feed at `/r/{sub}/new/.rss` (no OAuth) for up to four subreddits from `REDDIT_SUBREDDITS` (default `deals,buildapcsales`). `new.json` is only a fallback; it returns 403 from many networks. Stickied posts are skipped on the JSON fallback.
 
 Keyword matching is only a recall filter. The existing verifier still decides whether a listing is the item you want. If one feed request fails, that feed is skipped and the hunt continues.
 
@@ -55,4 +55,4 @@ Keyword matching is only a recall filter. The existing verifier still decides wh
 - **Tier 2** — Groq text match
 - **Tier 3** — Gemini Flash vision (ambiguous / image-critical only)
 - **Distance** — Nominatim + Haversine for local hunts only
-- **Sources** — Craigslist, Playwright Facebook Marketplace, Slickdeals RSS, Reddit JSON
+- **Sources** — Craigslist, Playwright Facebook Marketplace, Slickdeals RSS, Reddit Atom

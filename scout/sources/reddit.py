@@ -51,6 +51,89 @@ def _absolute_permalink(permalink: str, post_id: str) -> str:
     return f"https://www.reddit.com/comments/{post_id}"
 
 
+def _plain_html(html: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", html or "")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _html_images(html: str) -> list[str]:
+    images: list[str] = []
+    for src in re.findall(r"""<img[^>]+src=["']([^"']+)["']""", html or "", re.IGNORECASE):
+        url = src.replace("&amp;", "&")
+        if _http_url(url) and url not in images:
+            images.append(url)
+    return images
+
+
+def parse_reddit_atom(
+    xml_text: str, query: str, max_price: float | None
+) -> list[RawListing]:
+    """Map a Reddit Atom feed (/new/.rss). www.reddit.com JSON is often blocked."""
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        logger.warning("reddit atom feed did not parse")
+        return []
+
+    def local(tag: str) -> str:
+        return tag.rsplit("}", 1)[-1]
+
+    listings: list[RawListing] = []
+    seen: set[str] = set()
+    for entry in root.iter():
+        if local(entry.tag) != "entry":
+            continue
+        title = ""
+        link = ""
+        post_id = ""
+        content = ""
+        thumb: str | None = None
+        for child in list(entry):
+            tag = local(child.tag)
+            if tag == "title" and child.text:
+                title = child.text.strip()
+            elif tag == "link":
+                href = child.get("href") or ""
+                rel = child.get("rel") or "alternate"
+                if href and rel == "alternate":
+                    link = href
+            elif tag == "id" and child.text:
+                post_id = child.text.strip()
+            elif tag == "content" and child.text:
+                content = child.text
+            elif tag == "thumbnail":
+                thumb = _http_url(child.get("url"))
+        if post_id.startswith("t3_"):
+            post_id = post_id[3:]
+        title = title.strip()
+        if not title or not post_id or post_id in seen:
+            continue
+        plain = _plain_html(content)
+        if not recall_match(query, f"{title}\n{plain}"):
+            continue
+        price = parse_dollar_price(title)
+        if price_over_max(price, max_price):
+            continue
+        images = _html_images(content)
+        if thumb and thumb not in images:
+            images.insert(0, thumb)
+        seen.add(post_id)
+        listings.append(
+            RawListing(
+                source="reddit",
+                external_id=post_id,
+                url=link or f"https://www.reddit.com/comments/{post_id}",
+                title=title,
+                price=price,
+                images=images,
+                raw_text=plain,
+            )
+        )
+    return listings
+
+
 def parse_reddit_payload(
     payload: dict, query: str, max_price: float | None
 ) -> list[RawListing]:
@@ -112,13 +195,26 @@ class RedditAdapter:
         query: str,
         max_price: float | None,
     ) -> list[RawListing]:
+        # JSON listing endpoints return 403 from many networks. The public Atom
+        # feed is the one that answers. Fall back to JSON if Atom is not XML.
+        atom_url = f"https://www.reddit.com/r/{sub}/new/.rss"
+        try:
+            resp = await client.get(atom_url)
+            resp.raise_for_status()
+            body = resp.text or ""
+            if "<feed" in body[:800] or "http://www.w3.org/2005/Atom" in body[:800]:
+                return parse_reddit_atom(body, query, max_price)
+            logger.warning("reddit atom r/%s was not a feed (%s)", sub, resp.status_code)
+        except Exception as exc:
+            logger.warning("reddit atom feed failed r/%s: %s", sub, exc)
+
         url = f"https://www.reddit.com/r/{sub}/new.json"
         try:
             resp = await client.get(url, params={"limit": 25})
             resp.raise_for_status()
             payload = resp.json()
         except Exception as exc:
-            logger.warning("reddit feed failed r/%s: %s", sub, exc)
+            logger.warning("reddit json feed failed r/%s: %s", sub, exc)
             return []
         if not isinstance(payload, dict):
             logger.warning("reddit feed r/%s returned non-object JSON", sub)

@@ -16,7 +16,12 @@ from scout.config import Settings
 from scout.db import Database
 from scout.sources import RawListing
 from scout.sources.keywords import query_tokens
-from scout.sources.reddit import RedditAdapter, parse_reddit_payload, parse_subreddits
+from scout.sources.reddit import (
+    RedditAdapter,
+    parse_reddit_atom,
+    parse_reddit_payload,
+    parse_subreddits,
+)
 from scout.sources.slickdeals import SlickdealsAdapter, parse_slickdeals_rss
 from scout.verify import VerifierPipeline
 from scout.worker import ScoutWorker
@@ -90,6 +95,55 @@ def test_reddit_parser_maps_post_and_skips_stickied_and_bad_thumbs():
     for external_id in ("postself", "postdefault", "postnsfw"):
         assert external_id in by_id
         assert by_id[external_id].images == []
+
+
+ATOM_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>t3_atom1</id>
+    <title>Herman Miller Aeron $220</title>
+    <link rel="alternate" href="https://www.reddit.com/r/deals/comments/atom1/aeron/"/>
+    <content type="html">&lt;p&gt;Size B pickup&lt;/p&gt;&lt;img src="https://preview.redd.it/aeron.jpg"&gt;</content>
+    <thumbnail url="https://b.thumbs.redditmedia.com/aeron.jpg"/>
+  </entry>
+  <entry>
+    <id>t3_atom2</id>
+    <title>Blender $40</title>
+    <link rel="alternate" href="https://www.reddit.com/r/deals/comments/atom2/blender/"/>
+    <content type="html">kitchen</content>
+  </entry>
+</feed>
+"""
+
+
+def test_reddit_atom_parser_maps_entries():
+    listings = parse_reddit_atom(ATOM_SAMPLE, "aeron", None)
+    assert len(listings) == 1
+    post = listings[0]
+    assert post.external_id == "atom1"
+    assert post.url.endswith("/aeron/")
+    assert post.price == 220.0
+    assert "Size B pickup" in post.raw_text
+    assert post.images[0] == "https://b.thumbs.redditmedia.com/aeron.jpg"
+    assert "https://preview.redd.it/aeron.jpg" in post.images
+    capped = parse_reddit_atom(ATOM_SAMPLE, "aeron", 100)
+    assert capped == []
+
+
+def test_slickdeals_reads_images_from_encoded_html():
+    xml_text = """<?xml version="1.0"?>
+    <rss xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel><item>
+      <title>Laptop sleeve $8.49</title>
+      <link>https://slickdeals.net/f/9</link>
+      <description>no image here</description>
+      <content:encoded><![CDATA[<img src="https://static.slickdealscdn.com/sleeve.jpg">]]></content:encoded>
+      <guid>thread-9</guid>
+    </item></channel></rss>
+    """
+    rows = parse_slickdeals_rss(xml_text, "laptop", None)
+    assert len(rows) == 1
+    assert rows[0].images == ["https://static.slickdealscdn.com/sleeve.jpg"]
+    assert rows[0].price == 8.49
 
 
 def test_reddit_subreddits_capped():
