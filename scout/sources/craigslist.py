@@ -12,8 +12,13 @@ from scout.sources import RawListing
 
 logger = logging.getLogger(__name__)
 
-# Craigslist result pages are offset with `s` in steps of about 120.
+# Older HTML result pages were offset with `s` in steps of about 120.
+# The current site ignores that offset and repeats the first page, so search()
+# uses the JSON results the site itself loads, and falls back to one HTML pass.
 SEARCH_PAGE_SIZE = 120
+JSON_SEARCH_URL = "https://sapi.craigslist.org/web/v8/postings/search/full"
+# Minimum batch the JSON search accepts. Newer rows come first when sort=date.
+JSON_BATCH = "1-0-360-1-0"
 
 # Used only when search() is called without max_miles. The worker passes the
 # hunt value (or Settings.default_max_miles) explicitly.
@@ -128,8 +133,7 @@ def parse_search_results(html: str, site: str) -> list[RawListing]:
         if not href or "/search/" in href:
             continue
         full_url = urljoin(f"https://{site}.craigslist.org/", href)
-        m = re.search(r"/(\d+)\.html", full_url)
-        external_id = m.group(1) if m else full_url
+        external_id = _posting_id(full_url)
 
         title_el = card.select_one(".title, .result-title")
         if title_el:
@@ -167,6 +171,133 @@ def parse_search_results(html: str, site: str) -> list[RawListing]:
             )
         )
     return results
+
+
+def _posting_id(url: str) -> str:
+    """Numeric id from older /123.html URLs, otherwise the token in /view/d/slug/TOKEN."""
+    match = re.search(r"/(\d+)\.html", url)
+    if match:
+        return match.group(1)
+    token = url.rstrip("/").split("/")[-1].split("?")[0]
+    return token or url
+
+
+def _image_url(token: str) -> str | None:
+    # JSON image ids look like "3:00S0S_5Ha92TfkGlD_0t20CI".
+    image_id = token.split(":", 1)[1] if ":" in token else token
+    if not image_id or not re.fullmatch(r"[0-9A-Za-z_]+", image_id):
+        return None
+    return f"https://images.craigslist.org/{image_id}_600x450.jpg"
+
+
+def _geo_point(value: str) -> tuple[str | None, float | None, float | None]:
+    """Parse '1:1:1~40.7339~-74.0054' into a location index plus coordinates."""
+    parts = value.split("~")
+    if len(parts) < 3:
+        return None, None, None
+    index = parts[0].split(":")[-1] or None
+    return index, _as_float(parts[-2]), _as_float(parts[-1])
+
+
+def _listing_from_json_item(
+    item: object, descriptions: list
+) -> RawListing | None:
+    if not isinstance(item, list) or not item:
+        return None
+    token: str | None = None
+    slug: str | None = None
+    price: float | None = None
+    images: list[str] = []
+    lat: float | None = None
+    lng: float | None = None
+    loc_index: str | None = None
+    for part in item:
+        if isinstance(part, str) and "~" in part:
+            loc_index, lat, lng = _geo_point(part)
+            continue
+        if not isinstance(part, list) or not part:
+            continue
+        tag = part[0]
+        if tag == 13 and len(part) > 1 and isinstance(part[1], str):
+            token = part[1]
+        elif tag == 6 and len(part) > 1 and isinstance(part[1], str):
+            slug = part[1]
+        elif tag == 10 and len(part) > 1:
+            price = _parse_price(str(part[1]))
+        elif tag == 4:
+            for image in part[1:]:
+                if isinstance(image, str):
+                    url = _image_url(image)
+                    if url and url not in images:
+                        images.append(url)
+    title = item[-1].strip() if isinstance(item[-1], str) else ""
+    if not token or not title or "~" in title:
+        return None
+    if slug:
+        url = f"https://www.craigslist.org/view/d/{slug}/{token}"
+    else:
+        url = f"https://www.craigslist.org/view/d/{token}"
+    location_text = None
+    if loc_index and loc_index.isdigit():
+        idx = int(loc_index)
+        if 0 <= idx < len(descriptions) and isinstance(descriptions[idx], str):
+            location_text = descriptions[idx]
+    return RawListing(
+        source="craigslist",
+        external_id=token,
+        url=url,
+        title=title,
+        price=price,
+        location_text=location_text,
+        lat=lat,
+        lng=lng,
+        images=images,
+        raw_text=title,
+    )
+
+
+def parse_json_search(payload: object) -> list[RawListing]:
+    """Map a Craigslist search JSON document into listings."""
+    if not isinstance(payload, dict):
+        return []
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    decode = data.get("decode") if isinstance(data.get("decode"), dict) else {}
+    descriptions = decode.get("locationDescriptions") or []
+    if not isinstance(descriptions, list):
+        descriptions = []
+    results: list[RawListing] = []
+    seen: set[str] = set()
+    for item in data.get("items") or []:
+        listing = _listing_from_json_item(item, descriptions)
+        if listing is None or listing.external_id in seen:
+            continue
+        seen.add(listing.external_id)
+        results.append(listing)
+    return results
+
+
+def build_json_params(
+    query: str,
+    home_zip: str,
+    max_price: float | None,
+    max_miles: float,
+    *,
+    batch: str = JSON_BATCH,
+) -> dict[str, str]:
+    postal = re.sub(r"\D", "", home_zip)[:5]
+    params = {
+        "batch": batch,
+        "cc": "us",
+        "lang": "en",
+        "postal": postal,
+        "searchPath": "sss",
+        "search_distance": _format_miles(max_miles),
+        "query": query,
+        "sort": "date",
+    }
+    if max_price is not None:
+        params["max_price"] = str(int(max_price))
+    return params
 
 
 def _add_new_listings(
@@ -290,13 +421,70 @@ class CraigslistAdapter:
         max_pages: int | None = None,
         max_results: int | None = None,
     ) -> list[RawListing]:
-        site = site_for_zip(home_zip)
         miles = DEFAULT_MAX_MILES if max_miles is None else float(max_miles)
         page_limit = self.max_pages if max_pages is None else max_pages
         result_limit = self.max_results if max_results is None else max_results
+        try:
+            results = await self._search_json(query, home_zip, max_price, miles, result_limit)
+        except Exception as exc:
+            logger.warning("craigslist json search failed, using html: %s", exc)
+            results = await self._search_html(
+                query, home_zip, max_price, miles, page_limit, result_limit
+            )
+        logger.info("craigslist search %r -> %d results", query, len(results))
+        return results
+
+    async def _search_json(
+        self,
+        query: str,
+        home_zip: str,
+        max_price: float | None,
+        miles: float,
+        result_limit: int,
+    ) -> list[RawListing]:
+        params = build_json_params(query, home_zip, max_price, miles)
+        headers = {**_HEADERS, "Accept": "application/json"}
+        async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
+            resp = await client.get(JSON_SEARCH_URL, params=params, headers=headers)
+            resp.raise_for_status()
+            payload = resp.json()
+            rows = parse_json_search(payload)
+            data = payload.get("data") if isinstance(payload, dict) else {}
+            total = 0
+            cache_ts = None
+            if isinstance(data, dict):
+                total = int(data.get("totalResultCount") or 0)
+                cache_ts = data.get("cacheTs")
+            # The first batch is capped at 360. A follow-up with the cache
+            # timestamp returns the rest when the hunt asks for more.
+            if (
+                result_limit > len(rows)
+                and total > len(rows)
+                and cache_ts
+            ):
+                more = dict(params)
+                more["batch"] = f"1-{cache_ts}-0-1-0"
+                follow = await client.get(JSON_SEARCH_URL, params=more, headers=headers)
+                follow.raise_for_status()
+                fuller = parse_json_search(follow.json())
+                if fuller:
+                    rows = fuller
+        if result_limit >= 0:
+            return rows[:result_limit]
+        return rows
+
+    async def _search_html(
+        self,
+        query: str,
+        home_zip: str,
+        max_price: float | None,
+        miles: float,
+        page_limit: int,
+        result_limit: int,
+    ) -> list[RawListing]:
+        site = site_for_zip(home_zip)
         results: list[RawListing] = []
         seen: set[str] = set()
-
         async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
             for page_idx in range(page_limit):
                 if len(results) >= result_limit:
@@ -313,8 +501,6 @@ class CraigslistAdapter:
                 )
                 if added == 0:
                     break
-
-        logger.info("craigslist search %r on %s -> %d results", query, site, len(results))
         return results
 
     async def fetch_detail(self, listing: RawListing) -> RawListing:

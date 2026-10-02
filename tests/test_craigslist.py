@@ -14,7 +14,9 @@ from scout.sources import craigslist
 from scout.sources.craigslist import (
     SEARCH_PAGE_SIZE,
     CraigslistAdapter,
+    build_json_params,
     build_search_url,
+    parse_json_search,
     parse_posting_page,
     parse_search_results,
 )
@@ -351,6 +353,136 @@ def test_enrich_skips_filtered_rows_and_keeps_card_on_failure(caplog: pytest.Log
     assert out[3].raw_text == third.raw_text
     assert "craigslist detail fetch failed" in caplog.text
     assert second.url in caplog.text
+
+
+JSON_FIXTURE = {
+    "data": {
+        "decode": {
+            "locationDescriptions": [0, "Greenwich Village", "Union Square"],
+        },
+        "totalResultCount": 2,
+        "cacheTs": 111,
+        "items": [
+            [
+                37841571,
+                1,
+                5,
+                45,
+                "1:1:1~40.7339~-74.0054",
+                "0t20CI",
+                [13, "vmSaruTasif78T441S5A3q"],
+                [4, "3:00S0S_5Ha92TfkGlD_0t20CI"],
+                [6, "new-york-mint-unused-cosori"],
+                [10, "$45"],
+                "Cosori air fryer",
+            ],
+            [
+                38939904,
+                2,
+                136,
+                20,
+                "1:2:2~40.7402~-73.9996",
+                "05r07g",
+                [13, "iiy523o2NEm4tr36W6XCeb"],
+                [4, "not-an-image"],
+                [6, "new-york-herman-miller-aeron-mirra"],
+                [10, "$20"],
+                "Herman Miller Aeron wheels",
+            ],
+            [
+                1,
+                [13, "vmSaruTasif78T441S5A3q"],
+                [6, "duplicate"],
+                [10, "$10"],
+                "Duplicate token",
+            ],
+        ],
+    }
+}
+
+NEW_HTML = """
+<li class="cl-static-search-result">
+  <a href="https://www.craigslist.org/view/d/new-york-herman-miller-aeron/iiy523o2NEm4tr36W6XCeb">
+    <div class="title">Herman Miller Aeron wheels</div>
+    <div class="details">
+      <div class="price">$20</div>
+      <div class="location">Union Square</div>
+    </div>
+  </a>
+</li>
+"""
+
+
+def test_parse_json_search_maps_token_price_location_and_image():
+    rows = parse_json_search(JSON_FIXTURE)
+    assert [row.external_id for row in rows] == [
+        "vmSaruTasif78T441S5A3q",
+        "iiy523o2NEm4tr36W6XCeb",
+    ]
+    first, second = rows
+    assert first.title == "Cosori air fryer"
+    assert first.price == 45
+    assert first.location_text == "Greenwich Village"
+    assert first.lat == 40.7339
+    assert first.lng == -74.0054
+    assert first.images == [
+        "https://images.craigslist.org/00S0S_5Ha92TfkGlD_0t20CI_600x450.jpg"
+    ]
+    assert first.url.endswith("/new-york-mint-unused-cosori/vmSaruTasif78T441S5A3q")
+    assert second.location_text == "Union Square"
+    assert second.images == []
+    assert parse_json_search({"data": {}}) == []
+
+
+def test_new_html_url_uses_posting_token():
+    rows = parse_search_results(NEW_HTML, "newyork")
+    assert len(rows) == 1
+    assert rows[0].external_id == "iiy523o2NEm4tr36W6XCeb"
+    assert rows[0].price == 20
+    assert rows[0].location_text == "Union Square"
+
+
+def test_json_search_requests_postal_distance_and_skips_html(monkeypatch: pytest.MonkeyPatch):
+    calls: list[tuple[str, dict]] = []
+
+    class _JsonResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return JSON_FIXTURE
+
+    class _JsonClient:
+        async def __aenter__(self) -> _JsonClient:
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+        async def get(self, url: str, params: dict | None = None, headers: dict | None = None):
+            del headers
+            calls.append((url, dict(params or {})))
+            return _JsonResponse()
+
+    monkeypatch.setattr(craigslist.httpx, "AsyncClient", lambda *a, **k: _JsonClient())
+    rows = asyncio.run(
+        CraigslistAdapter().search("aeron", "10001", 400, max_miles=25, max_results=10)
+    )
+    assert len(calls) == 1
+    assert calls[0][0] == craigslist.JSON_SEARCH_URL
+    assert calls[0][1]["postal"] == "10001"
+    assert calls[0][1]["search_distance"] == "25"
+    assert calls[0][1]["query"] == "aeron"
+    assert calls[0][1]["max_price"] == "400"
+    assert calls[0][1]["sort"] == "date"
+    assert [row.external_id for row in rows] == [
+        "vmSaruTasif78T441S5A3q",
+        "iiy523o2NEm4tr36W6XCeb",
+    ]
+    built = build_json_params("desk", "94107-1234", None, 10.5)
+    assert built["postal"] == "94107"
+    assert "max_price" not in built
+    assert built["search_distance"] == "10.5"
 
 
 def test_craigslist_settings_env_names(monkeypatch: pytest.MonkeyPatch):
